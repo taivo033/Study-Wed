@@ -1,16 +1,459 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Study Web</title>
-  <link rel="stylesheet" href="style.css">
-</head>
-<body>
-  <h1>My Study Web</h1>
-  <video controls width="600">
-    <source src="sample.mp4" type="video/mp4">
-    Your browser does not support the video tag.
-  </video>
-  <script src="script.js"></script>
-</body>
-</html>
+import React, { useEffect, useMemo, useState } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, Clock, Plus, Trash2, BookOpen, CalendarDays, Play, Pause, X, Video, Search, ListChecks, Target, Layers, ChevronRight, Tag } from "lucide-react";
+
+// --- Minimal shadcn-like primitives (fallbacks) ---
+// If you already use shadcn/ui, replace these with real imports.
+const Button = ({ className = "", children, ...props }) => (
+  <button
+    className={
+      "rounded-2xl px-4 py-2 shadow-sm border border-slate-200 bg-white hover:bg-slate-50 active:scale-[0.99] transition " +
+      className
+    }
+    {...props}
+  >
+    {children}
+  </button>
+);
+
+const Card = ({ className = "", children }) => (
+  <div className={"rounded-2xl bg-white shadow-sm border border-slate-200 " + className}>{children}</div>
+);
+const CardHeader = ({ children, className = "" }) => (
+  <div className={"px-5 pt-5 pb-3 border-b border-slate-100 " + className}>{children}</div>
+);
+const CardContent = ({ children, className = "" }) => (
+  <div className={"px-5 py-4 " + className}>{children}</div>
+);
+
+// --- Helpers ---
+const uid = () => Math.random().toString(36).slice(2, 9);
+const todayISO = () => new Date().toISOString().slice(0, 10);
+const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+// --- LocalStorage Hook ---
+function useLocalStorage(key, initialValue) {
+  const [value, setValue] = useState(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      return raw ? JSON.parse(raw) : initialValue;
+    } catch {
+      return initialValue;
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {}
+  }, [key, value]);
+  return [value, setValue];
+}
+
+// --- Main App ---
+export default function StudyPlanApp() {
+  const [query, setQuery] = useState("");
+  const [tasks, setTasks] = useLocalStorage("sp_tasks", [
+    { id: uid(), title: "Ôn APTIS Listening", subject: "English", due: todayISO(), duration: 30, priority: "medium", done: false },
+    { id: uid(), title: "Đọc Sinh lý tuần 3", subject: "Nursing", due: todayISO(), duration: 45, priority: "high", done: false },
+    { id: uid(), title: "Tiếng Trung bài 6", subject: "Chinese", due: todayISO(), duration: 25, priority: "low", done: true },
+  ]);
+  const [videos, setVideos] = useLocalStorage("sp_videos", [
+    { id: uid(), title: "Bài học 1 — Giải phẫu", url: "baihoc1.mp4" },
+  ]);
+  const [filter, setFilter] = useLocalStorage("sp_filter", { subject: "all", status: "all", priority: "all" });
+  const [showAddTask, setShowAddTask] = useState(false);
+  const [showAddVideo, setShowAddVideo] = useState(false);
+  const [timer, setTimer] = useLocalStorage("sp_timer", { running: false, minutes: 25, seconds: 0, mode: "Pomodoro" });
+
+  // Timer logic
+  useEffect(() => {
+    if (!timer.running) return;
+    const id = setInterval(() => {
+      setTimer((t) => {
+        let { minutes, seconds } = t;
+        if (minutes === 0 && seconds === 0) return { ...t, running: false };
+        if (seconds === 0) return { ...t, minutes: Math.max(0, minutes - 1), seconds: 59 };
+        return { ...t, seconds: seconds - 1 };
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [timer.running, setTimer]);
+
+  const completed = tasks.filter((t) => t.done).length;
+  const progress = tasks.length ? Math.round((completed / tasks.length) * 100) : 0;
+
+  const filtered = useMemo(() => {
+    return tasks.filter((t) => {
+      const matchesQuery = query
+        ? (t.title + " " + (t.subject || "") + " " + (t.priority || "")).toLowerCase().includes(query.toLowerCase())
+        : true;
+      const matchesSubject = filter.subject === "all" || t.subject === filter.subject;
+      const matchesStatus = filter.status === "all" || (filter.status === "done" ? t.done : !t.done);
+      const matchesPriority = filter.priority === "all" || t.priority === filter.priority;
+      return matchesQuery && matchesSubject && matchesStatus && matchesPriority;
+    });
+  }, [tasks, filter, query]);
+
+  const subjects = useMemo(() => {
+    const set = new Set(tasks.map((t) => t.subject).filter(Boolean));
+    return ["all", ...Array.from(set)];
+  }, [tasks]);
+
+  function addTask(payload) {
+    setTasks((prev) => [{ id: uid(), done: false, ...payload }, ...prev]);
+  }
+  function toggleTask(id) {
+    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+  }
+  function removeTask(id) {
+    setTasks((prev) => prev.filter((t) => t.id !== id));
+  }
+  function addVideo(payload) {
+    setVideos((prev) => [{ id: uid(), ...payload }, ...prev]);
+  }
+  function removeVideo(id) {
+    setVideos((prev) => prev.filter((v) => v.id !== id));
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Topbar */}
+      <div className="sticky top-0 z-20 backdrop-blur supports-[backdrop-filter]:bg-white/70 bg-white border-b border-slate-200">
+        <div className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-3">
+          <BookOpen className="w-6 h-6" />
+          <h1 className="text-xl font-semibold">Study Plan — Private</h1>
+          <span className="ml-auto" />
+          <div className="flex items-center gap-2">
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Tìm nhiệm vụ, môn học..."
+                className="pl-9 pr-3 py-2 rounded-2xl border border-slate-200 bg-white focus:outline-none focus:ring-2 focus:ring-slate-300"
+              />
+            </div>
+            <Button onClick={() => setShowAddTask(true)} className="flex items-center gap-2">
+              <Plus className="w-4 h-4" /> Thêm nhiệm vụ
+            </Button>
+            <Button onClick={() => setShowAddVideo(true)} className="flex items-center gap-2">
+              <Video className="w-4 h-4" /> Thêm video
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="max-w-6xl mx-auto px-4 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left: Progress + Timer + Subjects */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5" />
+                <h2 className="font-semibold">Tiến độ tổng</h2>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-4">
+                <ProgressCircle value={progress} />
+                <div>
+                  <div className="text-2xl font-semibold">{progress}%</div>
+                  <div className="text-slate-500">{completed}/{tasks.length} nhiệm vụ hoàn thành</div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2"><Clock className="w-5 h-5" /><h2 className="font-semibold">Pomodoro</h2></div>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center justify-between">
+                <div className="text-3xl font-semibold tabular-nums">
+                  {String(timer.minutes).padStart(2, "0")}:{String(timer.seconds).padStart(2, "0")}
+                </div>
+                <div className="flex items-center gap-2">
+                  {!timer.running ? (
+                    <Button onClick={() => setTimer({ ...timer, running: true })} className="flex items-center gap-2"><Play className="w-4 h-4" />Bắt đầu</Button>
+                  ) : (
+                    <Button onClick={() => setTimer({ ...timer, running: false })} className="flex items-center gap-2"><Pause className="w-4 h-4" />Tạm dừng</Button>
+                  )}
+                  <Button onClick={() => setTimer({ running: false, minutes: 25, seconds: 0, mode: "Pomodoro" })}>Reset</Button>
+                </div>
+              </div>
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  type="range"
+                  min={5}
+                  max={60}
+                  value={timer.minutes}
+                  onChange={(e) => setTimer({ ...timer, minutes: clamp(parseInt(e.target.value), 5, 60), seconds: 0 })}
+                  className="w-full"
+                />
+                <span className="text-slate-600 min-w-10 text-right">{timer.minutes}′</span>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2"><Layers className="w-5 h-5" /><h2 className="font-semibold">Bộ lọc</h2></div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 gap-3">
+                <Select label="Môn học" value={filter.subject} onChange={(v) => setFilter((f) => ({ ...f, subject: v }))} options={subjects} />
+                <Select label="Trạng thái" value={filter.status} onChange={(v) => setFilter((f) => ({ ...f, status: v }))} options={["all", "done", "todo"]} />
+                <Select label="Độ ưu tiên" value={filter.priority} onChange={(v) => setFilter((f) => ({ ...f, priority: v }))} options={["all", "high", "medium", "low"]} />
+                <Button onClick={() => setFilter({ subject: "all", status: "all", priority: "all" })}>Xoá lọc</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Middle: Task list */}
+        <div className="space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2"><ListChecks className="w-5 h-5" /><h2 className="font-semibold">Nhiệm vụ</h2></div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                <AnimatePresence>
+                  {filtered.map((t) => (
+                    <motion.div
+                      key={t.id}
+                      initial={{ opacity: 0, y: 6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                    >
+                      <TaskRow task={t} onToggle={() => toggleTask(t.id)} onRemove={() => removeTask(t.id)} />
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+                {filtered.length === 0 && (
+                  <div className="text-slate-500 text-sm">Không có nhiệm vụ phù hợp bộ lọc.</div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center gap-2"><Video className="w-5 h-5" /><h2 className="font-semibold">Thư viện video</h2></div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid md:grid-cols-2 gap-4">
+                {videos.map((v) => (
+                  <div key={v.id} className="border border-slate-200 rounded-xl overflow-hidden">
+                    <video src={v.url} controls className="w-full h-48 object-cover bg-slate-100" />
+                    <div className="px-3 py-2 flex items-center gap-2">
+                      <div className="font-medium truncate" title={v.title}>{v.title}</div>
+                      <span className="ml-auto" />
+                      <Button onClick={() => removeVideo(v.id)} className="px-2 py-1"><Trash2 className="w-4 h-4" /></Button>
+                    </div>
+                  </div>
+                ))}
+                {videos.length === 0 && <div className="text-slate-500 text-sm">Chưa có video. Nhấn "Thêm video" để thêm URL hoặc file trong cùng thư mục.</div>}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Dialogs */}
+      <AddTaskDialog open={showAddTask} onClose={() => setShowAddTask(false)} onSubmit={addTask} />
+      <AddVideoDialog open={showAddVideo} onClose={() => setShowAddVideo(false)} onSubmit={addVideo} />
+
+      {/* Footer */}
+      <footer className="py-10 text-center text-xs text-slate-500">Made for you — runs offline & stores data in your browser (localStorage).</footer>
+    </div>
+  );
+}
+
+function TaskRow({ task, onToggle, onRemove }) {
+  const dueLabel = useMemo(() => {
+    const today = new Date();
+    const due = task.due ? new Date(task.due) : null;
+    if (!due) return "Không hạn";
+    const delta = Math.ceil((due - new Date(today.toDateString())) / (1000 * 60 * 60 * 24));
+    if (delta === 0) return "Hôm nay";
+    if (delta === 1) return "Ngày mai";
+    if (delta < 0) return `${Math.abs(delta)} ngày trễ`;
+    return `Còn ${delta} ngày`;
+  }, [task.due]);
+
+  return (
+    <div className="group flex items-center gap-3 p-3 rounded-xl border border-slate-200 hover:bg-slate-50">
+      <button onClick={onToggle} className="shrink-0">
+        {task.done ? (
+          <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+        ) : (
+          <span className="w-6 h-6 inline-flex items-center justify-center rounded-full border border-slate-300" />
+        )}
+      </button>
+      <div className="min-w-0">
+        <div className={`font-medium ${task.done ? "line-through text-slate-400" : ""}`}>{task.title}</div>
+        <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5">
+          {task.subject && <span className="inline-flex items-center gap-1"><Tag className="w-3 h-3" />{task.subject}</span>}
+          {task.priority && <Badge tone={task.priority} label={task.priority} />}
+          {task.duration ? (
+            <span className="inline-flex items-center gap-1"><Clock className="w-3 h-3" />{task.duration}′</span>
+          ) : null}
+          <span className="inline-flex items-center gap-1"><CalendarDays className="w-3 h-3" />{task.due || "—"} <ChevronRight className="w-3 h-3" /> {dueLabel}</span>
+        </div>
+      </div>
+      <span className="ml-auto" />
+      <Button onClick={onRemove} className="opacity-0 group-hover:opacity-100 transition px-2 py-1"><Trash2 className="w-4 h-4" /></Button>
+    </div>
+  );
+}
+
+function ProgressCircle({ value = 0 }) {
+  const r = 42;
+  const c = 2 * Math.PI * r;
+  const pct = clamp(value, 0, 100);
+  const dash = (pct / 100) * c;
+  return (
+    <svg width="120" height="120" className="shrink-0">
+      <circle cx="60" cy="60" r={r} strokeWidth="10" stroke="#e2e8f0" fill="none" />
+      <motion.circle
+        cx="60"
+        cy="60"
+        r={r}
+        strokeWidth="10"
+        stroke="#0ea5e9"
+        fill="none"
+        strokeLinecap="round"
+        initial={{ strokeDasharray: `0 ${c}` }}
+        animate={{ strokeDasharray: `${dash} ${c}` }}
+        transition={{ type: "spring", stiffness: 120, damping: 20 }}
+      />
+      <text x="60" y="65" textAnchor="middle" className="fill-slate-700 text-lg font-semibold">
+        {pct}%
+      </text>
+    </svg>
+  );
+}
+
+function Badge({ tone = "low", label }) {
+  const map = {
+    high: "bg-rose-50 text-rose-700 border-rose-200",
+    medium: "bg-amber-50 text-amber-700 border-amber-200",
+    low: "bg-emerald-50 text-emerald-700 border-emerald-200",
+  };
+  return <span className={`text-[11px] px-2 py-0.5 rounded-full border ${map[tone] || "bg-slate-50 text-slate-700 border-slate-200"}`}>{label}</span>;
+}
+
+function Select({ label, value, onChange, options = [] }) {
+  return (
+    <label className="text-sm">
+      <div className="text-slate-600 mb-1">{label}</div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-300"
+      >
+        {options.map((op) => (
+          <option key={op} value={op}>{op}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function AddTaskDialog({ open, onClose, onSubmit }) {
+  const [form, setForm] = useState({ title: "", subject: "", due: todayISO(), duration: 25, priority: "medium" });
+  useEffect(() => {
+    if (open) setForm({ title: "", subject: "", due: todayISO(), duration: 25, priority: "medium" });
+  }, [open]);
+  if (!open) return null;
+  return (
+    <Dialog onDismiss={onClose}>
+      <div className="text-lg font-semibold mb-3">Thêm nhiệm vụ</div>
+      <div className="grid gap-3">
+        <TextField label="Tiêu đề" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
+        <TextField label="Môn học" value={form.subject} onChange={(v) => setForm({ ...form, subject: v })} />
+        <div className="grid grid-cols-2 gap-3">
+          <TextField label="Hạn" type="date" value={form.due} onChange={(v) => setForm({ ...form, due: v })} />
+          <TextField label="Thời lượng (phút)" type="number" value={form.duration} onChange={(v) => setForm({ ...form, duration: parseInt(v) || 0 })} />
+        </div>
+        <Select label="Ưu tiên" value={form.priority} onChange={(v) => setForm({ ...form, priority: v })} options={["high", "medium", "low"]} />
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button onClick={onClose}>Hủy</Button>
+        <Button
+          className="bg-slate-900 text-white hover:bg-slate-800"
+          onClick={() => {
+            if (!form.title.trim()) return;
+            onSubmit(form);
+            onClose();
+          }}
+        >
+          Lưu
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+function AddVideoDialog({ open, onClose, onSubmit }) {
+  const [form, setForm] = useState({ title: "", url: "" });
+  useEffect(() => { if (open) setForm({ title: "", url: "" }); }, [open]);
+  if (!open) return null;
+  return (
+    <Dialog onDismiss={onClose}>
+      <div className="text-lg font-semibold mb-3">Thêm video</div>
+      <div className="grid gap-3">
+        <TextField label="Tiêu đề" value={form.title} onChange={(v) => setForm({ ...form, title: v })} />
+        <TextField label="URL hoặc tên file (ví dụ: baihoc1.mp4)" value={form.url} onChange={(v) => setForm({ ...form, url: v })} />
+        <p className="text-xs text-slate-500">Nếu là file cục bộ, hãy đặt file video cùng thư mục với trang web (ví dụ: <code>index.html</code>) rồi nhập tên file.</p>
+      </div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button onClick={onClose}>Hủy</Button>
+        <Button
+          className="bg-slate-900 text-white hover:bg-slate-800"
+          onClick={() => {
+            if (!form.url.trim()) return;
+            onSubmit(form);
+            onClose();
+          }}
+        >
+          Lưu
+        </Button>
+      </div>
+    </Dialog>
+  );
+}
+
+function Dialog({ children, onDismiss }) {
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+      <div className="absolute inset-0 bg-black/30" onClick={onDismiss} />
+      <motion.div
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, y: -10 }}
+        className="relative w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl border border-slate-200"
+      >
+        <button className="absolute right-3 top-3" onClick={onDismiss}><X className="w-5 h-5 text-slate-500" /></button>
+        {children}
+      </motion.div>
+    </div>
+  );
+}
+
+function TextField({ label, value, onChange, type = "text" }) {
+  return (
+    <label className="text-sm">
+      <div className="text-slate-600 mb-1">{label}</div>
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-slate-300"
+      />
+    </label>
+  );
+}
